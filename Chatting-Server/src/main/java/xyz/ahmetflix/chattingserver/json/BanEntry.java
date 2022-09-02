@@ -64,9 +64,9 @@ public abstract class BanEntry<T> extends UserListEntry<T>
         return this.reason;
     }
 
-    boolean hasExpired()
+    public boolean hasExpired()
     {
-        return this.banEndDate == null ? false : this.banEndDate.before(new Date());
+        return this.banEndDate != null && this.banEndDate.before(new Date());
     }
 
     protected void onSerialization(JsonObject data)

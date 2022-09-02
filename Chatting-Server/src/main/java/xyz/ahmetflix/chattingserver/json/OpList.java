@@ -36,7 +36,7 @@ public class OpList extends UserList<UserProfile, UserListOpsEntry>
         return userlistopsentry != null && userlistopsentry.bypassesUserLimit();
     }
 
-    protected String getObjectKey(UserProfile obj)
+    public String getObjectKey(UserProfile obj)
     {
         return obj.getId().toString();
     }

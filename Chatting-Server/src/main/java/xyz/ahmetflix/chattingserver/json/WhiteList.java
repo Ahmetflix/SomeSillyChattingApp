@@ -30,7 +30,7 @@ public class WhiteList extends UserList<UserProfile, UserListWhitelistEntry>
         return astring;
     }
 
-    protected String getObjectKey(UserProfile obj)
+    public String getObjectKey(UserProfile obj)
     {
         return obj.getId().toString();
     }

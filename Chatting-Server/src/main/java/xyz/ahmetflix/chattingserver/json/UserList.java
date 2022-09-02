@@ -105,12 +105,12 @@ public class UserList<K, V extends UserListEntry<K>>
     /**
      * Gets the key value for the given object
      */
-    protected String getObjectKey(K obj)
+    public String getObjectKey(K obj)
     {
         return obj.toString();
     }
 
-    protected boolean hasEntry(K entry)
+    public boolean hasEntry(K entry)
     {
         return this.values.containsKey(this.getObjectKey(entry));
     }

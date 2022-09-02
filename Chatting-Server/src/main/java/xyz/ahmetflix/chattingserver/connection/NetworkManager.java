@@ -10,8 +10,10 @@ import io.netty.channel.local.LocalServerChannel;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.timeout.TimeoutException;
 import io.netty.util.AttributeKey;
+import io.netty.util.concurrent.AbstractEventExecutor;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
+import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.Validate;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -32,7 +34,7 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
 
     private static final Logger LOGGER = LogManager.getLogger();
     public static final Marker networkMarker = MarkerManager.getMarker("NETWORK");
-    public static final Marker networkPacketsMarket = MarkerManager.getMarker("NETWORK_PACKETS", NetworkManager.networkMarker);
+    public static final Marker networkPacketsMarker = MarkerManager.getMarker("NETWORK_PACKETS", NetworkManager.networkMarker);
     public static final AttributeKey<EnumProtocol> protocolAttributeKey = AttributeKey.valueOf("protocol");
     public static final LazyInitVar<NioEventLoopGroup> CLIENT_NIO_EVENTLOOP = new LazyInitVar<NioEventLoopGroup>() {
         protected NioEventLoopGroup init() {
@@ -98,7 +100,7 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
         }
 
         this.close(msg);
-        throwable.printStackTrace(); // Spigot
+        throwable.printStackTrace();
     }
 
     protected void processPacket(ChannelHandlerContext channelhandlercontext, Packet packet) throws Exception {
@@ -113,14 +115,14 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
 
     public void setListener(PacketListener packetlistener) {
         Validate.notNull(packetlistener, "packetListener", new Object[0]);
-        NetworkManager.LOGGER.debug("Set listener of {} to {}", new Object[] { this, packetlistener});
+        NetworkManager.LOGGER.info("Set listener of {} to {}", new Object[] { this, packetlistener});
         this.packetListener = packetlistener;
     }
 
     public void handle(Packet packet) {
         if (this.isChannelOpen()) {
             this.flushQueue();
-            this.dispatchPacket(packet, null);
+            this.dispatchPacket(packet, null, Boolean.TRUE);
         } else {
             this.readWriteLock.writeLock().lock();
 
@@ -132,56 +134,107 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
         }
     }
 
-    private void dispatchPacket(final Packet packet, final GenericFutureListener<? extends Future<? super Void>>[] agenericfuturelistener) {
-        final EnumProtocol enumprotocol = EnumProtocol.getFromPacket(packet);
-        final EnumProtocol enumprotocol1 = this.channel.attr(NetworkManager.protocolAttributeKey).get();
+    public void handle(Packet packet, GenericFutureListener<? extends Future<? super Void>> listener, GenericFutureListener<? extends Future<? super Void>>... listeners) {
+        if (this.isChannelOpen()) {
+            this.flushQueue();
+            this.dispatchPacket(packet, ArrayUtils.insert(0, listeners, listener), Boolean.TRUE);
+        } else {
+            this.readWriteLock.writeLock().lock();
 
-        if (enumprotocol1 != enumprotocol) {
+            try {
+                this.packetsQueue.add(new NetworkManager.QueuedPacket(packet, ArrayUtils.insert(0, listeners, listener)));
+            } finally {
+                this.readWriteLock.writeLock().unlock();
+            }
+        }
+
+    }
+
+    private void dispatchPacket(final Packet packet, final GenericFutureListener<? extends Future<? super Void>>[] listeners, Boolean flushConditional) {
+        this.packetWrites.getAndIncrement();
+        boolean effectiveFlush = flushConditional == null ? this.canFlush : flushConditional;
+        final boolean flush = effectiveFlush /*|| packet instanceof PacketPlayOutKeepAlive || packet instanceof PacketPlayOutKickDisconnect*/;
+
+        final EnumProtocol packetProtocol = EnumProtocol.getProtocolForPacket(packet);
+        final EnumProtocol currentProtocol = this.channel.attr(NetworkManager.protocolAttributeKey).get();
+
+        if (currentProtocol != packetProtocol) {
             NetworkManager.LOGGER.debug("Disabled auto read");
             this.channel.config().setAutoRead(false);
         }
 
         if (this.channel.eventLoop().inEventLoop()) {
-            if (enumprotocol != enumprotocol1) {
-                this.setProtocol(enumprotocol);
+            if (packetProtocol != currentProtocol) {
+                this.setProtocol(packetProtocol);
             }
 
-            ChannelFuture channelfuture = this.channel.writeAndFlush(packet);
+            ChannelFuture channelfuture = flush ? this.channel.writeAndFlush(packet) : this.channel.write(packet);
 
-            if (agenericfuturelistener != null) {
-                channelfuture.addListeners(agenericfuturelistener);
+            if (listeners != null) {
+                channelfuture.addListeners(listeners);
             }
 
             channelfuture.addListener(ChannelFutureListener.FIRE_EXCEPTION_ON_FAILURE);
         } else {
-            this.channel.eventLoop().execute(new Runnable() {
-                public void run() {
-                    if (enumprotocol != enumprotocol1) {
-                        NetworkManager.this.setProtocol(enumprotocol);
+            Runnable choice1 = null;
+            AbstractEventExecutor.LazyRunnable choice2 = null;
+            if (flush) {
+                choice1 = () -> {
+                    if (packetProtocol != currentProtocol) {
+                        this.setProtocol(packetProtocol);
                     }
 
-                    ChannelFuture channelfuture = NetworkManager.this.channel.writeAndFlush(packet);
-
-                    if (agenericfuturelistener != null) {
-                        channelfuture.addListeners(agenericfuturelistener);
+                    try {
+                        ChannelFuture channelFuture = this.channel.writeAndFlush(packet);
+                        if (listeners != null) {
+                            channelFuture.addListeners(listeners);
+                        }
+                        channelFuture.addListener(ChannelFutureListener.FIRE_EXCEPTION_ON_FAILURE);
+                    } catch (Exception e) {
+                        LOGGER.error("NetworkException: " /* + getUser() */, e);
+                        close("Internal Exception: " + e.getMessage());
                     }
-
-                    channelfuture.addListener(ChannelFutureListener.FIRE_EXCEPTION_ON_FAILURE);
-                }
-            });
+                };
+            } else {
+                choice2 = () -> {
+                    if (packetProtocol != currentProtocol) {
+                        this.setProtocol(packetProtocol);
+                    }
+                    try {
+                        ChannelFuture channelFuture = this.channel.write(packet);
+                        if (listeners != null) {
+                            channelFuture.addListeners(listeners);
+                        }
+                        channelFuture.addListener(ChannelFutureListener.FIRE_EXCEPTION_ON_FAILURE);
+                    } catch (Exception e) {
+                        LOGGER.error("NetworkException: " /* + getUser() */, e);
+                        close("Internal Exception: " + e.getMessage());
+                    }
+                };
+            }
+            this.channel.eventLoop().execute(choice1 != null ? choice1 : choice2);
         }
 
     }
 
     private void flushQueue() {
+        if (this.packetsQueue.isEmpty()) {
+            return;
+        }
         if (this.channel != null && this.channel.isOpen()) {
             this.readWriteLock.readLock().lock();
-
+            boolean needsFlush = this.canFlush;
+            boolean hasWrotePacket = false;
             try {
                 while (!this.packetsQueue.isEmpty()) {
                     NetworkManager.QueuedPacket queuedPacket = this.packetsQueue.poll();
+                    Packet packet = queuedPacket.packet;
+                    if (hasWrotePacket && (needsFlush || this.canFlush)) {
+                        flush();
+                    }
 
-                    this.dispatchPacket(queuedPacket.packet, queuedPacket.listeners);
+                    this.dispatchPacket(packet, queuedPacket.listeners, (this.packetsQueue.size() < 1 && (needsFlush || this.canFlush)) ? Boolean.TRUE : Boolean.FALSE);
+                    hasWrotePacket = true;
                 }
             } finally {
                 this.readWriteLock.readLock().unlock();
@@ -218,8 +271,7 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
 
     public void enableEncryption(SecretKey secretkey) {
         this.isEncrypted = true;
-        //this.channel.pipeline().addBefore("splitter", "decrypt", new PacketDecrypter(MinecraftEncryption.a(2, secretkey)));
-        //this.channel.pipeline().addBefore("prepender", "encrypt", new PacketEncrypter(MinecraftEncryption.a(1, secretkey)));
+        // dont encrypting because of dont authorizing for now
     }
 
     public boolean isChannelOpen() {
@@ -284,8 +336,35 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
         }
     }
 
-    protected void channelRead0(ChannelHandlerContext channelhandlercontext, Packet object) throws Exception { // CraftBukkit - fix decompile error
-        this.processPacket(channelhandlercontext, (Packet) object);
+    protected void channelRead0(ChannelHandlerContext channelhandlercontext, Packet object) throws Exception {
+        this.processPacket(channelhandlercontext, object);
+    }
+
+    volatile boolean canFlush = true;
+    private final java.util.concurrent.atomic.AtomicInteger packetWrites = new java.util.concurrent.atomic.AtomicInteger();
+    private int flushPacketsStart;
+    private final Object flushLock = new Object();
+
+    public void disableAutomaticFlush() {
+        synchronized (this.flushLock) {
+            this.flushPacketsStart = this.packetWrites.get();
+            this.canFlush = false;
+        }
+    }
+
+    public void enableAutomaticFlush() {
+        synchronized (this.flushLock) {
+            this.canFlush = true;
+            if (this.packetWrites.get() != this.flushPacketsStart) {
+                this.flush();
+            }
+        }
+    }
+
+    private void flush() {
+        if (this.channel.eventLoop().inEventLoop()) {
+            this.channel.flush();
+        }
     }
 
     static class QueuedPacket {

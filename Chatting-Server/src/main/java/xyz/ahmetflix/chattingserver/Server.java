@@ -1,24 +1,30 @@
 package xyz.ahmetflix.chattingserver;
 
+import com.google.common.base.Charsets;
 import com.google.common.collect.Lists;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufOutputStream;
+import io.netty.buffer.Unpooled;
+import io.netty.handler.codec.base64.Base64;
 import io.netty.util.ResourceLeakDetector;
 import jline.console.ConsoleReader;
-import org.apache.commons.lang3.SystemUtils;
+import org.apache.commons.lang3.Validate;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import xyz.ahmetflix.chattingserver.connection.ServerConnection;
+import xyz.ahmetflix.chattingserver.connection.pipeline.ServerConnection;
 import xyz.ahmetflix.chattingserver.crash.CrashReport;
 import xyz.ahmetflix.chattingserver.crash.ReportedException;
 import xyz.ahmetflix.chattingserver.main.Main;
+import xyz.ahmetflix.chattingserver.status.ServerStatusResponse;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.List;
-import java.util.Queue;
+import java.util.*;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.ThreadLocalRandom;
 
 public abstract class Server implements Runnable, IAsyncTaskHandler, ICommandListener {
 
@@ -27,6 +33,9 @@ public abstract class Server implements Runnable, IAsyncTaskHandler, ICommandLis
     public static int currentTick = (int) (System.currentTimeMillis() / 50);
     private Thread serverThread;
     private ServerConnection serverConnection;
+    private final ServerStatusResponse statusResponse = new ServerStatusResponse();
+    private long nanoTimeSinceStatusRefresh = 0L;
+    private String motd;
     private final UserCache userCache;
     public ConsoleReader reader;
     private UsersList usersList;
@@ -78,6 +87,12 @@ public abstract class Server implements Runnable, IAsyncTaskHandler, ICommandLis
     public void run() {
         try {
             if (this.init()) {
+                // TODO: add this to init
+                WatchdogThread.doStart(10);
+
+                this.statusResponse.setServerDescription(this.motd);
+                this.addFavicon(this.statusResponse);
+
                 Arrays.fill( recentTps, 20 );
                 long lastTick = System.nanoTime(), catchupTime = 0, curTime, wait, tickSection = lastTick;
                 while (this.isRunning) {
@@ -128,6 +143,7 @@ public abstract class Server implements Runnable, IAsyncTaskHandler, ICommandLis
             }
         } finally {
             try {
+                WatchdogThread.doStop();
                 this.isStopped = true;
                 this.stop();
             } catch (Throwable throwable1) {
@@ -146,7 +162,25 @@ public abstract class Server implements Runnable, IAsyncTaskHandler, ICommandLis
     protected abstract boolean init() throws IOException;
 
     protected void tick() {
+        long nanos = System.nanoTime();
 
+        ++this.ticks;
+        this.heartbeat();
+        if (nanos - this.nanoTimeSinceStatusRefresh >= 5000000000L) {
+            this.nanoTimeSinceStatusRefresh = nanos;
+            this.statusResponse.setPlayerCountData(new ServerStatusResponse.UserCountData(this.getMaxUsers(), this.getUserCount()));
+            UserProfile[] userProfiles = new UserProfile[Math.min(this.getUserCount(), 12)];
+            int j = nextInt(ThreadLocalRandom.current(), 0, this.getUserCount() - userProfiles.length);
+
+            for (int k = 0; k < userProfiles.length; ++k) {
+                userProfiles[k] = (this.usersList.getUsers().get(j + k)).getProfile();
+            }
+
+            Collections.shuffle(Arrays.asList(userProfiles));
+            this.statusResponse.getPlayerCountData().setUsers(userProfiles);
+        }
+
+        WatchdogThread.tick();
     }
 
     public void heartbeat() {
@@ -193,7 +227,7 @@ public abstract class Server implements Runnable, IAsyncTaskHandler, ICommandLis
     public CrashReport addServerInfoToCrashReport(CrashReport report) {
         if (this.usersList != null)
         {
-            report.getSystemDetails().addCrashSectionCallable("Player Count", () -> Server.this.usersList.getPlayerCount() + " / " + Server.this.usersList.getMaxPlayers() + "; " + Server.this.usersList.getUsers());
+            report.getSystemDetails().addCrashSectionCallable("Player Count", () -> Server.this.usersList.getUserCount() + " / " + Server.this.usersList.getMaxUsers() + "; " + Server.this.usersList.getUsers());
         }
 
         return report;
@@ -206,6 +240,62 @@ public abstract class Server implements Runnable, IAsyncTaskHandler, ICommandLis
 
     public ServerConnection getServerConnection() {
         return this.serverConnection == null ? this.serverConnection = new ServerConnection(this) : this.serverConnection;
+    }
+
+    public void addFavicon(ServerStatusResponse response) {
+        File file = new File(workspace(), "server-icon.png");
+
+        if (file.isFile()) {
+            ByteBuf bytebuf = Unpooled.buffer();
+
+            try {
+                BufferedImage bufferedimage = ImageIO.read(file);
+
+                Validate.validState(bufferedimage.getWidth() == 64, "Must be 64 pixels wide");
+                Validate.validState(bufferedimage.getHeight() == 64, "Must be 64 pixels high");
+                ImageIO.write(bufferedimage, "PNG", new ByteBufOutputStream(bytebuf));
+                ByteBuf bytebuf1 = Base64.encode(bytebuf);
+
+                response.setFavicon("data:image/png;base64," + bytebuf1.toString(Charsets.UTF_8));
+            } catch (Exception exception) {
+                LOGGER.error("Couldn\'t load server icon", exception);
+            } finally {
+                bytebuf.release();
+            }
+        }
+    }
+
+    public String getMotd() {
+        return motd;
+    }
+
+    public void setMotd(String motd) {
+        this.motd = motd;
+    }
+
+    public int getUserCount() {
+        return this.usersList.getUserCount();
+    }
+
+    public int getMaxUsers() {
+        return this.usersList.getMaxUsers();
+    }
+
+    public UsersList getUsersList() {
+        return usersList;
+    }
+
+    public void setUsersList(UsersList usersList) {
+        this.usersList = usersList;
+    }
+
+    public ServerStatusResponse getStatusResponse() {
+        return statusResponse;
+    }
+
+    // TODO: move to any math class
+    public static int nextInt(Random var0, int var1, int var2) {
+        return var1 >= var2 ? var1 : var0.nextInt(var2 - var1 + 1) + var1;
     }
 
     public static Server getInstance() {

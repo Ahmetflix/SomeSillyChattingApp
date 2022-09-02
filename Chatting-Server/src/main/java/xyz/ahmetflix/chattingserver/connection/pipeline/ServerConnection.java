@@ -1,21 +1,27 @@
-package xyz.ahmetflix.chattingserver.connection;
+package xyz.ahmetflix.chattingserver.connection.pipeline;
 
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import io.netty.bootstrap.ServerBootstrap;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.*;
 import io.netty.channel.epoll.Epoll;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
 import io.netty.channel.local.LocalEventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
-import io.netty.util.concurrent.Future;
-import io.netty.util.concurrent.GenericFutureListener;
+import io.netty.handler.timeout.ReadTimeoutHandler;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import xyz.ahmetflix.chattingserver.LazyInitVar;
 import xyz.ahmetflix.chattingserver.Server;
+import xyz.ahmetflix.chattingserver.connection.EnumProtocolDirection;
+import xyz.ahmetflix.chattingserver.connection.NetworkManager;
+import xyz.ahmetflix.chattingserver.connection.ServerPipeline;
+import xyz.ahmetflix.chattingserver.connection.packet.PacketListener;
+import xyz.ahmetflix.chattingserver.connection.packet.listeners.handshaking.HandshakeListener;
 import xyz.ahmetflix.chattingserver.crash.CrashReport;
 import xyz.ahmetflix.chattingserver.crash.CrashReportSystemDetails;
 import xyz.ahmetflix.chattingserver.crash.ReportedException;
@@ -25,10 +31,10 @@ import java.net.InetAddress;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import java.util.concurrent.Callable;
 
 public class ServerConnection {
 
+    private static final WriteBufferWaterMark SERVER_WRITE_MARK = new WriteBufferWaterMark(1 << 20, 1 << 21);
     private static final Logger LOGGER = LogManager.getLogger();
 
     public static final LazyInitVar<NioEventLoopGroup> eventLoops = new LazyInitVar<NioEventLoopGroup>() {
@@ -52,6 +58,14 @@ public class ServerConnection {
     public volatile boolean isAlive;
     private final List<ChannelFuture> endpoints = Collections.synchronizedList(Lists.<ChannelFuture>newArrayList());
     private final List<NetworkManager> networkManagers = Collections.synchronizedList(Lists.<NetworkManager>newArrayList());
+    public final java.util.Queue<NetworkManager> pending = new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+    private void addPending() {
+        NetworkManager manager;
+        while ((manager = pending.poll()) != null) {
+            this.networkManagers.add(manager);
+        }
+    }
 
     public ServerConnection(Server server)
     {
@@ -74,27 +88,7 @@ public class ServerConnection {
                 LOGGER.info("Using default channel type");
             }
 
-            this.endpoints.add((new ServerBootstrap()).channel(socketClass).childHandler(new ChannelInitializer() {
-                protected void initChannel(Channel channel) throws Exception {
-                    try {
-                        channel.config().setOption(ChannelOption.TCP_NODELAY, Boolean.TRUE);
-                    } catch (ChannelException ignored) {
-
-                    }
-
-                    /*channel.pipeline().addLast("timeout", new ReadTimeoutHandler(30))
-                            .addLast("legacy_query", new LegacyPingHandler(ServerConnection.this))
-                            .addLast("splitter", new PacketSplitter())
-                            .addLast("decoder", new PacketDecoder(EnumProtocolDirection.SERVERBOUND))
-                            .addLast("prepender", new PacketPrepender())
-                            .addLast("encoder", new PacketEncoder(EnumProtocolDirection.CLIENTBOUND));
-                    NetworkManager networkmanager = new NetworkManager(EnumProtocolDirection.SERVERBOUND);
-
-                    ServerConnection.this.h.add(networkmanager);
-                    channel.pipeline().addLast("packet_handler", networkmanager);
-                    networkmanager.a((PacketListener) (new HandshakeListener(ServerConnection.this.f, networkmanager)));*/
-                }
-            }).group(eventLoops.get()).localAddress(address, port).bind().syncUninterruptibly());
+            this.endpoints.add(((new ServerBootstrap().channel(socketClass)).childOption(ChannelOption.WRITE_BUFFER_WATER_MARK, SERVER_WRITE_MARK).childHandler(new ServerPipeline(this)).group(eventLoops.get()).localAddress(address, port)).bind().syncUninterruptibly());
         }
     }
 
@@ -106,14 +100,16 @@ public class ServerConnection {
                 channelfuture.channel().close().sync();
             } catch (InterruptedException interruptedexception) {
                 LOGGER.error("Interrupted whilst closing channel");
+            } finally {
+                eventLoops.get().shutdownGracefully();
             }
         }
     }
 
     public void tick() {
         synchronized (this.networkManagers) {
+            this.addPending();
             Iterator<NetworkManager> iterator = this.networkManagers.iterator();
-
             while (iterator.hasNext())
             {
                 final NetworkManager networkmanager = iterator.next();
@@ -159,4 +155,7 @@ public class ServerConnection {
         }
     }
 
+    public Server getServer() {
+        return server;
+    }
 }

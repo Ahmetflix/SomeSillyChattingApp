@@ -38,7 +38,7 @@ public class UserListBans extends UserList<UserProfile, UserListBansEntry>
     /**
      * Gets the key value for the given object
      */
-    protected String getObjectKey(UserProfile obj)
+    public String getObjectKey(UserProfile obj)
     {
         return obj.getId().toString();
     }

@@ -18,6 +18,14 @@ public class ChatUser implements ICommandListener {
         this.profile = profile;
     }
 
+    public UserProfile getProfile() {
+        return profile;
+    }
+
+    public UUID getUniqueID() {
+        return uniqueID;
+    }
+
     @Override
     public String getName() {
         return this.profile.getName();
