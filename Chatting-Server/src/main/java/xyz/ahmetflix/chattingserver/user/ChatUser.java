@@ -26,6 +26,10 @@ public class ChatUser implements ICommandListener {
         return uniqueID;
     }
 
+    public int getId() {
+        return id;
+    }
+
     @Override
     public String getName() {
         return this.profile.getName();

@@ -5,6 +5,8 @@ import xyz.ahmetflix.chattingserver.Server;
 import xyz.ahmetflix.chattingserver.connection.EnumProtocol;
 import xyz.ahmetflix.chattingserver.connection.NetworkManager;
 import xyz.ahmetflix.chattingserver.connection.packet.impl.handshaking.PacketHandshakingInSetProtocol;
+import xyz.ahmetflix.chattingserver.connection.packet.impl.login.PacketLoginOutDisconnect;
+import xyz.ahmetflix.chattingserver.connection.packet.listeners.login.LoginListener;
 import xyz.ahmetflix.chattingserver.connection.packet.listeners.status.PacketStatusListener;
 
 import java.net.InetAddress;
@@ -41,7 +43,7 @@ public class HandshakeListener implements PacketHandshakingInListener {
                                 && currentTime - throttleTracker.get(address) < connectionThrottle) {
                             throttleTracker.put(address, currentTime);
                             text = "Connection throttled! Please wait before reconnecting.";
-                            //this.networkManager.handle(new PacketLoginOutDisconnect(text));
+                            this.networkManager.handle(new PacketLoginOutDisconnect(text));
                             this.networkManager.close(text);
                             return;
                         }
@@ -58,10 +60,9 @@ public class HandshakeListener implements PacketHandshakingInListener {
                     org.apache.logging.log4j.LogManager.getLogger().debug("Failed to check connection throttle", t);
                 }
 
-                // TODO: add login listener
-                //this.networkManager.setListener(new LoginListener(this.server, this.networkManager));
+                this.networkManager.setListener(new LoginListener(this.server, this.networkManager));
 
-                //((LoginListener) this.networkManager.getPacketListener()).hostname = packethandshakinginsetprotocol.hostname + ":" + packethandshakinginsetprotocol.port;
+                ((LoginListener) this.networkManager.getPacketListener()).hostname = packethandshakinginsetprotocol.hostname + ":" + packethandshakinginsetprotocol.port;
                 break;
             }
             case STATUS: {

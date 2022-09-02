@@ -54,12 +54,6 @@ public class Main {
             }
         };
         server.primaryThread.start();
-        server.processQueue.add(new Runnable() {
-            @Override
-            public void run() {
-                server.getUsersList().onUserJoin(server.getUsersList().attemptLogin(null, new UserProfile(null, "testuser"), "127.0.0.1"), "hoo");
-            }
-        });
     }
 
 }

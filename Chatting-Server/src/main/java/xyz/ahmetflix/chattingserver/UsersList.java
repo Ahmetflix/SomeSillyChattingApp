@@ -2,9 +2,13 @@ package xyz.ahmetflix.chattingserver;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import io.netty.buffer.Unpooled;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import xyz.ahmetflix.chattingserver.connection.NetworkManager;
 import xyz.ahmetflix.chattingserver.connection.packet.Packet;
+import xyz.ahmetflix.chattingserver.connection.packet.PacketDataSerializer;
+import xyz.ahmetflix.chattingserver.connection.packet.listeners.login.LoginListener;
 import xyz.ahmetflix.chattingserver.json.*;
 import xyz.ahmetflix.chattingserver.user.ChatUser;
 
@@ -45,6 +49,36 @@ public abstract class UsersList {
         this.maxUsers = 8;
     }
 
+    public void initializeConnection(NetworkManager networkmanager, ChatUser chatUser) {
+        UserProfile userProfile = chatUser.getProfile();
+        UserCache usercache = this.server.getUserCache();
+        UserProfile cachedProfile = usercache.getProfileByUUID(userProfile.getId());
+        String name = cachedProfile == null ? userProfile.getName() : cachedProfile.getName();
+        if (!Objects.equals(userProfile.getName(), name)) {
+            networkmanager.close(disconnect(chatUser));
+            return;
+        }
+        usercache.addNewProfile(userProfile);
+
+        String s1 = "local";
+
+        if (networkmanager.getSocketAddress() != null) {
+            s1 = networkmanager.getSocketAddress().toString();
+        }
+
+        /*PlayerConnection playerconnection = new PlayerConnection(this.server, networkmanager, chatUser);
+
+        playerconnection.sendPacket(new PacketPlayOutLogin(chatUser.getId(), Math.min(this.getMaxUsers(), 60)) */
+
+        this.server.refreshStatusNextTick();
+
+        String joinMessage = chatUser.getName() + " joined the server";
+
+        this.onUserJoin(chatUser, joinMessage);
+
+        LOGGER.info(chatUser.getName() + "[" + s1 + "] logged in with id " + chatUser.getId());
+    }
+
     public void onUserJoin(ChatUser chatUser, String joinMessage) {
         this.users.add(chatUser);
         this.usersByName.put(chatUser.getName(), chatUser);
@@ -80,7 +114,7 @@ public abstract class UsersList {
 
         return chatUser.getName() + " left the server";
     }
-    public ChatUser attemptLogin(/*LoginListener*/Object loginlistener, UserProfile userProfile, String hostname) {
+    public ChatUser attemptLogin(LoginListener loginlistener, UserProfile userProfile, String hostname) {
         UUID uuid = UserProfile.grabUUID(userProfile);
         userProfile = new UserProfile(uuid, userProfile.getName());
         List<ChatUser> arraylist = Lists.newArrayList();
@@ -95,7 +129,7 @@ public abstract class UsersList {
             //chatUser.connection.disconnect("You logged in from another location");
         }
 
-        SocketAddress socketaddress = null/*loginlistener.networkManager.getSocketAddress()*/;
+        SocketAddress socketaddress = loginlistener.networkManager.getSocketAddress();
 
         ChatUser user = new ChatUser(userProfile);
         String s;
@@ -113,8 +147,7 @@ public abstract class UsersList {
         } else if (!this.isWhitelisted(userProfile)) {
             s = "You are not white-listed on this server!";
             disallow = true;
-            // Dont check ips now because of login listener is not implemented
-        /*} else if (getBannedIPs().isBanned(socketaddress) && !getBannedIPs().getBanEntry(socketaddress).hasExpired()) {
+        } else if (getBannedIPs().isBanned(socketaddress) && !getBannedIPs().getBanEntry(socketaddress).hasExpired()) {
             IPBanEntry ipbanentry = this.bannedIPs.getBanEntry(socketaddress);
 
             s = "Your IP address is banned from this server!\nReason: " + ipbanentry.getBanReason();
@@ -123,7 +156,7 @@ public abstract class UsersList {
             }
 
             disallow = true;
-        */} else {
+        } else {
             s = "The server is full!";
             if (this.users.size() >= this.maxUsers) {
                 disallow = true;
@@ -131,7 +164,7 @@ public abstract class UsersList {
         }
 
         if (disallow) {
-            //loginlistener.disconnect(s);
+            loginlistener.disconnect(s);
             return null;
         }
         return user;
@@ -180,6 +213,10 @@ public abstract class UsersList {
 
     public boolean isWhitelisted(UserProfile userProfile) {
         return !this.hasWhitelist || this.ops.hasEntry(userProfile) || this.whitelist.hasEntry(userProfile);
+    }
+
+    public ChatUser getUserByUUID(UUID uuid) {
+        return this.uuidToUserMap.get(uuid);
     }
 
     public List<ChatUser> getUsers() {

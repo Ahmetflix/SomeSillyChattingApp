@@ -10,6 +10,10 @@ import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import org.apache.logging.log4j.LogManager;
 import xyz.ahmetflix.chattingserver.connection.packet.Packet;
 import xyz.ahmetflix.chattingserver.connection.packet.impl.handshaking.PacketHandshakingInSetProtocol;
+import xyz.ahmetflix.chattingserver.connection.packet.impl.login.PacketLoginInStart;
+import xyz.ahmetflix.chattingserver.connection.packet.impl.login.PacketLoginOutDisconnect;
+import xyz.ahmetflix.chattingserver.connection.packet.impl.login.PacketLoginOutSetCompression;
+import xyz.ahmetflix.chattingserver.connection.packet.impl.login.PacketLoginOutSuccess;
 import xyz.ahmetflix.chattingserver.connection.packet.impl.status.PacketStatusInPing;
 import xyz.ahmetflix.chattingserver.connection.packet.impl.status.PacketStatusInStart;
 import xyz.ahmetflix.chattingserver.connection.packet.impl.status.PacketStatusOutPong;
@@ -235,17 +239,13 @@ public enum EnumProtocol {
     },
     LOGIN(2) {
         {
-            /*this.registerPacket(EnumProtocolDirection.CLIENTBOUND, PacketLoginOutDisconnect.class,
+            this.registerPacket(EnumProtocolDirection.CLIENTBOUND, PacketLoginOutDisconnect.class,
                     PacketLoginOutDisconnect::new);
-            this.registerPacket(EnumProtocolDirection.CLIENTBOUND, PacketLoginOutEncryptionBegin.class,
-                    PacketLoginOutEncryptionBegin::new);
             this.registerPacket(EnumProtocolDirection.CLIENTBOUND, PacketLoginOutSuccess.class,
                     PacketLoginOutSuccess::new);
             this.registerPacket(EnumProtocolDirection.CLIENTBOUND, PacketLoginOutSetCompression.class,
                     PacketLoginOutSetCompression::new);
             this.registerPacket(EnumProtocolDirection.SERVERBOUND, PacketLoginInStart.class, PacketLoginInStart::new);
-            this.registerPacket(EnumProtocolDirection.SERVERBOUND, PacketLoginInEncryptionBegin.class,
-                    PacketLoginInEncryptionBegin::new);*/
         }
     };
 

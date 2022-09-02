@@ -181,6 +181,8 @@ public abstract class Server implements Runnable, IAsyncTaskHandler, ICommandLis
         }
 
         WatchdogThread.tick();
+
+        if (ticks > 600) throw new RuntimeException("raf raf.", new Error("hooooooooo"));
     }
 
     public void heartbeat() {
@@ -291,6 +293,18 @@ public abstract class Server implements Runnable, IAsyncTaskHandler, ICommandLis
 
     public ServerStatusResponse getStatusResponse() {
         return statusResponse;
+    }
+
+    public int getNetworkCompressionTreshold() {
+        return 256;
+    }
+
+    public UserCache getUserCache() {
+        return userCache;
+    }
+
+    public void refreshStatusNextTick() {
+        this.nanoTimeSinceStatusRefresh = 0L;
     }
 
     // TODO: move to any math class
