@@ -1,0 +1,4 @@
+- Set username / Kullanıcı adını ayarla
+- Show users / Kullanıcıları göster
+- Migrate to JavaFX / JavaFX e geç
+- Add server list / Sunucu listesi ekle
