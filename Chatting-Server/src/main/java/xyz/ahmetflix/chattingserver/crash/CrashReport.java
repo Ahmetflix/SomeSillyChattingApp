@@ -250,4 +250,8 @@ public class CrashReport {
 
         return crashreport;
     }
+
+    public File getReportFile() {
+        return reportFile;
+    }
 }

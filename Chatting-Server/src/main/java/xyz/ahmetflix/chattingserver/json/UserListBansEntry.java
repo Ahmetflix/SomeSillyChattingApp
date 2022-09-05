@@ -1,7 +1,7 @@
 package xyz.ahmetflix.chattingserver.json;
 
 import com.google.gson.JsonObject;
-import xyz.ahmetflix.chattingserver.UserProfile;
+import xyz.ahmetflix.chattingserver.user.UserProfile;
 
 import java.util.Date;
 import java.util.UUID;

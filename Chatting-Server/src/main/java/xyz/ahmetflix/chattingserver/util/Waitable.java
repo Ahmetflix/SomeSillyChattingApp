@@ -1,4 +1,4 @@
-package xyz.ahmetflix.chattingserver;
+package xyz.ahmetflix.chattingserver.util;
 
 import java.util.concurrent.ExecutionException;
 

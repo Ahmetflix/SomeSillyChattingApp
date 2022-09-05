@@ -5,7 +5,7 @@ import xyz.ahmetflix.chattingserver.connection.packet.impl.status.PacketStatusOu
 import xyz.ahmetflix.chattingserver.connection.packet.impl.status.PacketStatusOutServerInfo;
 
 public interface PacketStatusOutListener extends PacketListener {
-    void handleServerInfo(PacketStatusOutServerInfo var1);
+    void handleServerInfo(PacketStatusOutServerInfo packet);
 
-    void handlePong(PacketStatusOutPong var1);
+    void handlePong(PacketStatusOutPong packet);
 }

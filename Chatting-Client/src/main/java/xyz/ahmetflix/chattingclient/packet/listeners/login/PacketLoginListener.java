@@ -3,23 +3,25 @@ package xyz.ahmetflix.chattingclient.packet.listeners.login;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import xyz.ahmetflix.chattingclient.Client;
-import xyz.ahmetflix.chattingserver.UserProfile;
+import xyz.ahmetflix.chattingclient.ClientChatUser;
+import xyz.ahmetflix.chattingclient.packet.listeners.play.ClientUserConnection;
 import xyz.ahmetflix.chattingserver.connection.EnumProtocol;
 import xyz.ahmetflix.chattingserver.connection.NetworkManager;
-import xyz.ahmetflix.chattingserver.connection.packet.impl.login.PacketLoginOutDisconnect;
-import xyz.ahmetflix.chattingserver.connection.packet.impl.login.PacketLoginOutSetCompression;
-import xyz.ahmetflix.chattingserver.connection.packet.impl.login.PacketLoginOutSuccess;
+import xyz.ahmetflix.chattingserver.connection.packet.impl.login.*;
 import xyz.ahmetflix.chattingserver.connection.packet.listeners.login.PacketLoginOutListener;
+import xyz.ahmetflix.chattingserver.crpyt.CryptManager;
+import xyz.ahmetflix.chattingserver.user.UserProfile;
+
+import javax.crypto.SecretKey;
+import java.security.PublicKey;
 
 public class PacketLoginListener implements PacketLoginOutListener {
 
     private static final Logger LOGGER = LogManager.getLogger();
     private final Client client;
     private final NetworkManager networkManager;
-    private UserProfile profile;
 
-    public PacketLoginListener(NetworkManager networkManagerIn, Client client)
-    {
+    public PacketLoginListener(NetworkManager networkManagerIn, Client client) {
         this.networkManager = networkManagerIn;
         this.client = client;
     }
@@ -32,10 +34,11 @@ public class PacketLoginListener implements PacketLoginOutListener {
 
     @Override
     public void handleSuccess(PacketLoginOutSuccess packetIn) {
-        this.profile = packetIn.getProfile();
+        UserProfile profile = packetIn.getProfile();
         LOGGER.info("Login success");
+        this.client.user = new ClientChatUser(profile);
         this.networkManager.setProtocol(EnumProtocol.PLAY);
-        // TODO: set play listener
+        this.networkManager.setListener(this.client.user.connection = new ClientUserConnection(this.client, this.networkManager, profile));
     }
 
     @Override
@@ -48,5 +51,13 @@ public class PacketLoginListener implements PacketLoginOutListener {
         if (!this.networkManager.isLocalChannel()) {
             this.networkManager.setCompressionTreshold(packetIn.getThreshold());
         }
+    }
+
+    @Override
+    public void handleEncryptionBegin(PacketLoginOutEncryptionBegin packet) {
+        final SecretKey secretKey = CryptManager.createNewSharedKey();
+        PublicKey publicKey = packet.getPublicKey();
+
+        this.networkManager.handle(new PacketLoginInEncryptionBegin(secretKey, publicKey, packet.getVerifyToken()), f -> PacketLoginListener.this.networkManager.enableEncryption(secretKey));
     }
 }

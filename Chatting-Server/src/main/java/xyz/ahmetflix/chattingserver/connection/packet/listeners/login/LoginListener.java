@@ -7,17 +7,17 @@ import io.netty.util.concurrent.GenericFutureListener;
 import org.apache.commons.lang3.Validate;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import xyz.ahmetflix.chattingserver.FastRandom;
+import xyz.ahmetflix.chattingserver.util.FastRandom;
 import xyz.ahmetflix.chattingserver.ITickable;
 import xyz.ahmetflix.chattingserver.Server;
-import xyz.ahmetflix.chattingserver.UserProfile;
+import xyz.ahmetflix.chattingserver.user.UserProfile;
 import xyz.ahmetflix.chattingserver.connection.NetworkManager;
-import xyz.ahmetflix.chattingserver.connection.packet.impl.login.PacketLoginInStart;
-import xyz.ahmetflix.chattingserver.connection.packet.impl.login.PacketLoginOutDisconnect;
-import xyz.ahmetflix.chattingserver.connection.packet.impl.login.PacketLoginOutSetCompression;
-import xyz.ahmetflix.chattingserver.connection.packet.impl.login.PacketLoginOutSuccess;
+import xyz.ahmetflix.chattingserver.connection.packet.impl.login.*;
 import xyz.ahmetflix.chattingserver.user.ChatUser;
 
+import javax.crypto.SecretKey;
+import java.security.PrivateKey;
+import java.util.Arrays;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -39,9 +39,10 @@ public class LoginListener implements PacketLoginInListener, ITickable {
     public final NetworkManager networkManager;
     private LoginState loginState;
     private int connectionTimer;
-    private UserProfile loginGameProfile;
+    private UserProfile loginUserProfile;
     private ChatUser user;
     public String hostname = "";
+    private SecretKey loginKey;
 
     public LoginListener(Server server, NetworkManager networkmanager) {
         this.loginState = LoginState.HELLO;
@@ -55,7 +56,7 @@ public class LoginListener implements PacketLoginInListener, ITickable {
         if (this.loginState == LoginState.READY_TO_ACCEPT) {
             this.tryAcceptUser();
         } else if (this.loginState == LoginState.DELAY_ACCEPT) {
-            ChatUser chatUser = this.server.getUsersList().getUserByUUID(this.loginGameProfile.getId());
+            ChatUser chatUser = this.server.getUsersList().getUserByUUID(this.loginUserProfile.getId());
 
             if (chatUser == null) {
                 this.loginState = LoginState.READY_TO_ACCEPT;
@@ -81,18 +82,13 @@ public class LoginListener implements PacketLoginInListener, ITickable {
             this.networkManager.handle(new PacketLoginOutDisconnect(s));
             this.networkManager.close(s);
         } catch (Exception exception) {
-            LoginListener.LOGGER.error("Error whilst disconnecting player", exception);
+            LoginListener.LOGGER.error("Error whilst disconnecting user", exception);
         }
 
     }
 
-    public void initUUID() {
-        UUID uuid = UUID.nameUUIDFromBytes(("ChatUser:" + this.loginGameProfile.getName()).getBytes(Charsets.UTF_8));;
-        this.loginGameProfile = new UserProfile(uuid, this.loginGameProfile.getName());
-    }
-
     public void tryAcceptUser() {
-        ChatUser s = this.server.getUsersList().attemptLogin(this, this.loginGameProfile, hostname);
+        ChatUser s = this.server.getUsersList().attemptLogin(this, this.loginUserProfile, hostname);
 
         if (s == null) {
         } else {
@@ -106,8 +102,8 @@ public class LoginListener implements PacketLoginInListener, ITickable {
                 }, new GenericFutureListener[0]);
             }
 
-            this.networkManager.handle(new PacketLoginOutSuccess(this.loginGameProfile));
-            ChatUser chatUser = this.server.getUsersList().getUserByUUID(this.loginGameProfile.getId());
+            this.networkManager.handle(new PacketLoginOutSuccess(this.loginUserProfile));
+            ChatUser chatUser = this.server.getUsersList().getUserByUUID(this.loginUserProfile.getId());
 
             if (chatUser != null) {
                 this.loginState = LoginState.DELAY_ACCEPT;
@@ -127,24 +123,47 @@ public class LoginListener implements PacketLoginInListener, ITickable {
     public String getConnectionInfo() {
         String socketAddress = networkManager == null ? "null"
                 : (networkManager.getSocketAddress() == null ? "null" : networkManager.getSocketAddress().toString());
-        return this.loginGameProfile != null ? this.loginGameProfile.toString() + " (" + socketAddress + ")" : socketAddress;
+        return this.loginUserProfile != null ? this.loginUserProfile.toString() + " (" + socketAddress + ")" : socketAddress;
     }
 
     @Override
     public void handleLoginStart(PacketLoginInStart packetlogininstart) {
         Validate.validState(this.loginState == LoginState.HELLO, "Unexpected hello packet");
-        this.loginGameProfile = packetlogininstart.getUserProfile();
+        this.loginUserProfile = packetlogininstart.getUserProfile();
 
-        authenticatorPool.execute(() -> {
+        this.loginState = LoginState.KEY;
+        this.networkManager.handle(new PacketLoginOutEncryptionBegin("", this.server.getKeyPair().getPublic(), this.verifyToken));
+    }
+
+    @Override
+    public void handleEncryption(PacketLoginInEncryptionBegin packet) {
+        Validate.validState(this.loginState == LoginState.KEY, "Unexpected key packet");
+        PrivateKey privatekey = this.server.getKeyPair().getPrivate();
+
+        if (!Arrays.equals(this.verifyToken, packet.getVerifyToken(privatekey))) {
+            throw new IllegalStateException("Invalid nonce!");
+        } else {
             try {
-                initUUID();
-                LoginListener.LOGGER.info("UUID of player " + LoginListener.this.loginGameProfile.getName() + " is " + LoginListener.this.loginGameProfile.getId());
-                LoginListener.this.loginState = LoginState.READY_TO_ACCEPT;
+                this.loginKey = packet.getSecretKey(privatekey);
+                this.networkManager.enableEncryption(this.loginKey);
             } catch (Exception ex) {
-                disconnect("Failed to verify username!");
-                server.LOGGER.warn("Exception verifying " + loginGameProfile.getName(), ex);
+                throw new IllegalStateException("Protocol error", ex);
             }
-        });
+
+            authenticatorPool.execute(() -> {
+                try {
+                    if (!this.networkManager.isChannelOpen()) {
+                        return;
+                    }
+                    LoginListener.this.loginUserProfile = LoginListener.this.getProfile(LoginListener.this.loginUserProfile);
+                    LoginListener.this.loginState = LoginState.READY_TO_ACCEPT;
+                    LoginListener.LOGGER.info("UUID of user " + LoginListener.this.loginUserProfile.getName() + " is " + LoginListener.this.loginUserProfile.getId());
+                } catch (Exception ex) {
+                    disconnect("Failed to verify username!");
+                    Server.LOGGER.warn("Exception verifying " + loginUserProfile.getName(), ex);
+                }
+            });
+        }
     }
 
     protected UserProfile getProfile(UserProfile userProfile) {
@@ -155,6 +174,6 @@ public class LoginListener implements PacketLoginInListener, ITickable {
 
     enum LoginState {
 
-        HELLO, READY_TO_ACCEPT, DELAY_ACCEPT, ACCEPTED;
+        HELLO, KEY, READY_TO_ACCEPT, DELAY_ACCEPT, ACCEPTED;
     }
 }

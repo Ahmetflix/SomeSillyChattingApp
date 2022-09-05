@@ -2,12 +2,19 @@ package xyz.ahmetflix.chattingserver.connection;
 
 import com.google.common.collect.Queues;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import com.velocitypowered.natives.compression.VelocityCompressor;
+import com.velocitypowered.natives.util.Natives;
+import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
+import io.netty.channel.epoll.Epoll;
 import io.netty.channel.epoll.EpollEventLoopGroup;
+import io.netty.channel.epoll.EpollSocketChannel;
 import io.netty.channel.local.LocalChannel;
-import io.netty.channel.local.LocalEventLoopGroup;
 import io.netty.channel.local.LocalServerChannel;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.handler.timeout.TimeoutException;
 import io.netty.util.AttributeKey;
 import io.netty.util.concurrent.AbstractEventExecutor;
@@ -20,12 +27,19 @@ import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
 import xyz.ahmetflix.chattingserver.ITickable;
-import xyz.ahmetflix.chattingserver.LazyInitVar;
+import xyz.ahmetflix.chattingserver.connection.packet.listeners.play.UserConnection;
+import xyz.ahmetflix.chattingserver.connection.pipeline.*;
+import xyz.ahmetflix.chattingserver.user.ChatUser;
+import xyz.ahmetflix.chattingserver.util.CryptException;
+import xyz.ahmetflix.chattingserver.util.LazyInitVar;
 import xyz.ahmetflix.chattingserver.connection.packet.CancelledPacketHandleException;
 import xyz.ahmetflix.chattingserver.connection.packet.Packet;
 import xyz.ahmetflix.chattingserver.connection.packet.PacketListener;
+import xyz.ahmetflix.chattingserver.connection.packet.impl.play.PacketPlayOutKeepAlive;
+import xyz.ahmetflix.chattingserver.connection.packet.impl.play.PacketPlayOutKickDisconnect;
 
 import javax.crypto.SecretKey;
+import java.net.InetAddress;
 import java.net.SocketAddress;
 import java.util.Queue;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -34,21 +48,16 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
 
     private static final Logger LOGGER = LogManager.getLogger();
     public static final Marker networkMarker = MarkerManager.getMarker("NETWORK");
-    public static final Marker networkPacketsMarker = MarkerManager.getMarker("NETWORK_PACKETS", NetworkManager.networkMarker);
+    public static final Marker networkPacketsMarker = MarkerManager.getMarker("NETWORK_PACKETS").addParents(networkMarker);
     public static final AttributeKey<EnumProtocol> protocolAttributeKey = AttributeKey.valueOf("protocol");
-    public static final LazyInitVar<NioEventLoopGroup> CLIENT_NIO_EVENTLOOP = new LazyInitVar<NioEventLoopGroup>() {
+    public static final LazyInitVar<NioEventLoopGroup> CLIENT_NIO_EVENTLOOP = new LazyInitVar<>() {
         protected NioEventLoopGroup init() {
             return new NioEventLoopGroup(0, (new ThreadFactoryBuilder()).setNameFormat("Netty Client IO #%d").setDaemon(true).build());
         }
     };
-    public static final LazyInitVar<EpollEventLoopGroup> CLIENT_EPOLL_EVENTLOOP = new LazyInitVar<EpollEventLoopGroup>() {
+    public static final LazyInitVar<EpollEventLoopGroup> CLIENT_EPOLL_EVENTLOOP = new LazyInitVar<>() {
         protected EpollEventLoopGroup init() {
             return new EpollEventLoopGroup(0, (new ThreadFactoryBuilder()).setNameFormat("Netty Epoll Client IO #%d").setDaemon(true).build());
-        }
-    };
-    public static final LazyInitVar<LocalEventLoopGroup> CLIENT_LOCAL_EVENTLOOP = new LazyInitVar<LocalEventLoopGroup>() {
-        protected LocalEventLoopGroup init() {
-            return new LocalEventLoopGroup(0, (new ThreadFactoryBuilder()).setNameFormat("Netty Local Client IO #%d").setDaemon(true).build());
         }
     };
     private final EnumProtocolDirection direction;
@@ -115,7 +124,7 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
 
     public void setListener(PacketListener packetlistener) {
         Validate.notNull(packetlistener, "packetListener", new Object[0]);
-        NetworkManager.LOGGER.info("Set listener of {} to {}", new Object[] { this, packetlistener});
+        NetworkManager.LOGGER.debug("Set listener of {} to {}", new Object[] { this, packetlistener});
         this.packetListener = packetlistener;
     }
 
@@ -134,7 +143,8 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
         }
     }
 
-    public void handle(Packet packet, GenericFutureListener<? extends Future<? super Void>> listener, GenericFutureListener<? extends Future<? super Void>>... listeners) {
+    @SafeVarargs
+    public final void handle(Packet packet, GenericFutureListener<? extends Future<? super Void>> listener, GenericFutureListener<? extends Future<? super Void>>... listeners) {
         if (this.isChannelOpen()) {
             this.flushQueue();
             this.dispatchPacket(packet, ArrayUtils.insert(0, listeners, listener), Boolean.TRUE);
@@ -153,7 +163,7 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
     private void dispatchPacket(final Packet packet, final GenericFutureListener<? extends Future<? super Void>>[] listeners, Boolean flushConditional) {
         this.packetWrites.getAndIncrement();
         boolean effectiveFlush = flushConditional == null ? this.canFlush : flushConditional;
-        final boolean flush = effectiveFlush /*|| packet instanceof PacketPlayOutKeepAlive || packet instanceof PacketPlayOutKickDisconnect*/;
+        final boolean flush = effectiveFlush || packet instanceof PacketPlayOutKeepAlive || packet instanceof PacketPlayOutKickDisconnect;
 
         final EnumProtocol packetProtocol = EnumProtocol.getProtocolForPacket(packet);
         final EnumProtocol currentProtocol = this.channel.attr(NetworkManager.protocolAttributeKey).get();
@@ -191,7 +201,7 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
                         }
                         channelFuture.addListener(ChannelFutureListener.FIRE_EXCEPTION_ON_FAILURE);
                     } catch (Exception e) {
-                        LOGGER.error("NetworkException: " /* + getUser() */, e);
+                        LOGGER.error("NetworkException: " + getUser(), e);
                         close("Internal Exception: " + e.getMessage());
                     }
                 };
@@ -207,7 +217,7 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
                         }
                         channelFuture.addListener(ChannelFutureListener.FIRE_EXCEPTION_ON_FAILURE);
                     } catch (Exception e) {
-                        LOGGER.error("NetworkException: " /* + getUser() */, e);
+                        LOGGER.error("NetworkException: " + getUser(), e);
                         close("Internal Exception: " + e.getMessage());
                     }
                 };
@@ -269,9 +279,29 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
         return this.channel instanceof LocalChannel || this.channel instanceof LocalServerChannel;
     }
 
-    public void enableEncryption(SecretKey secretkey) {
-        this.isEncrypted = true;
-        // dont encrypting because of dont authorizing for now
+    public void enableEncryption(SecretKey secretkey) throws CryptException {
+        if (!this.isEncrypted) {
+            try {
+                com.velocitypowered.natives.encryption.VelocityCipher decryption = com.velocitypowered.natives.util.Natives.cipher
+                        .get().forDecryption(secretkey);
+                com.velocitypowered.natives.encryption.VelocityCipher encryption = com.velocitypowered.natives.util.Natives.cipher
+                        .get().forEncryption(secretkey);
+
+                this.isEncrypted = true;
+                this.channel.pipeline().addBefore("splitter", "decrypt", new PacketDecrypter(decryption));
+                this.channel.pipeline().addBefore("prepender", "encrypt", new PacketEncrypter(encryption));
+            } catch (java.security.GeneralSecurityException e) {
+                throw new CryptException(e);
+            }
+        }
+    }
+
+    public ChatUser getUser() {
+        if (getPacketListener() instanceof UserConnection) {
+            return ((UserConnection) getPacketListener()).user;
+        } else {
+            return null;
+        }
     }
 
     public boolean isChannelOpen() {
@@ -294,18 +324,19 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
         this.channel.config().setAutoRead(false);
     }
 
-    public void setCompressionTreshold(int i) {
-        /*if (i >= 0) {
+    public void setCompressionTreshold(int compressionTreshold) {
+        if (compressionTreshold >= 0) {
+            VelocityCompressor compressor = Natives.compress.get().create(-1);
             if (this.channel.pipeline().get("decompress") instanceof PacketDecompressor) {
-                ((PacketDecompressor) this.channel.pipeline().get("decompress")).a(i);
+                ((PacketDecompressor) this.channel.pipeline().get("decompress")).setThreshold(compressionTreshold);
             } else {
-                this.channel.pipeline().addBefore("decoder", "decompress", new PacketDecompressor(i));
+                this.channel.pipeline().addBefore("decoder", "decompress", new PacketDecompressor(compressor, compressionTreshold));
             }
 
             if (this.channel.pipeline().get("compress") instanceof PacketCompressor) {
-                ((PacketCompressor) this.channel.pipeline().get("decompress")).a(i);
+                ((PacketCompressor) this.channel.pipeline().get("decompress")).setThreshold(compressionTreshold);
             } else {
-                this.channel.pipeline().addBefore("encoder", "compress", new PacketCompressor(i));
+                this.channel.pipeline().addBefore("encoder", "compress", new PacketCompressor(compressor, compressionTreshold));
             }
         } else {
             if (this.channel.pipeline().get("decompress") instanceof PacketDecompressor) {
@@ -315,7 +346,7 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
             if (this.channel.pipeline().get("compress") instanceof PacketCompressor) {
                 this.channel.pipeline().remove("compress");
             }
-        }*/
+        }
 
     }
 
@@ -337,7 +368,9 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
     }
 
     protected void channelRead0(ChannelHandlerContext channelhandlercontext, Packet object) throws Exception {
-        this.processPacket(channelhandlercontext, object);
+        if (this.isChannelOpen()) {
+            this.processPacket(channelhandlercontext, object);
+        }
     }
 
     volatile boolean canFlush = true;
@@ -372,10 +405,53 @@ public class NetworkManager extends SimpleChannelInboundHandler<Packet> {
         private final Packet packet;
         private final GenericFutureListener<? extends Future<? super Void>>[] listeners;
 
+        @SafeVarargs
         public QueuedPacket(Packet packet, GenericFutureListener<? extends Future<? super Void>>... agenericfuturelistener) {
             this.packet = packet;
             this.listeners = agenericfuturelistener;
         }
     }
+
+    public static NetworkManager createNetworkManagerAndConnect(InetAddress address, int serverPort, boolean useNativeTransport)
+    {
+        final NetworkManager networkmanager = new NetworkManager(EnumProtocolDirection.CLIENTBOUND);
+        Class <? extends SocketChannel > oclass;
+        LazyInitVar <? extends EventLoopGroup > lazyloadbase;
+
+        if (Epoll.isAvailable() && useNativeTransport)
+        {
+            oclass = EpollSocketChannel.class;
+            lazyloadbase = CLIENT_EPOLL_EVENTLOOP;
+        }
+        else
+        {
+            oclass = NioSocketChannel.class;
+            lazyloadbase = CLIENT_NIO_EVENTLOOP;
+        }
+
+        ((Bootstrap)((Bootstrap)((Bootstrap)(new Bootstrap()).group((EventLoopGroup)lazyloadbase.get())).handler(new ChannelInitializer<Channel>()
+        {
+            protected void initChannel(Channel p_initChannel_1_) throws Exception
+            {
+                try
+                {
+                    p_initChannel_1_.config().setOption(ChannelOption.TCP_NODELAY, Boolean.valueOf(true));
+                }
+                catch (ChannelException var3)
+                {
+                    ;
+                }
+
+                p_initChannel_1_.pipeline().addLast((String)"timeout", (ChannelHandler)(new ReadTimeoutHandler(30)))
+                        .addLast((String)"splitter", (ChannelHandler)(new PacketSplitter()))
+                        .addLast((String)"decoder", (ChannelHandler)(new PacketDecoder(EnumProtocolDirection.CLIENTBOUND)))
+                        .addLast((String)"prepender", (ChannelHandler)(PacketPrepender.INSTANCE))
+                        .addLast((String)"encoder", (ChannelHandler)(new PacketEncoder(EnumProtocolDirection.SERVERBOUND)))
+                        .addLast((String)"packet_handler", (ChannelHandler)networkmanager);
+            }
+        })).channel(oclass)).connect(address, serverPort).syncUninterruptibly();
+        return networkmanager;
+    }
+
 
 }

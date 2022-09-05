@@ -1,7 +1,7 @@
 package xyz.ahmetflix.chattingserver.status;
 
 import com.google.gson.*;
-import xyz.ahmetflix.chattingserver.UserProfile;
+import xyz.ahmetflix.chattingserver.user.UserProfile;
 import xyz.ahmetflix.chattingserver.json.JsonUtils;
 
 import java.lang.reflect.Type;

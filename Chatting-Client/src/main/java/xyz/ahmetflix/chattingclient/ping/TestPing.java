@@ -10,8 +10,8 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.logging.log4j.LogManager;
-import xyz.ahmetflix.chattingserver.LazyInitVar;
-import xyz.ahmetflix.chattingserver.UserProfile;
+import xyz.ahmetflix.chattingserver.util.LazyInitVar;
+import xyz.ahmetflix.chattingserver.user.UserProfile;
 import xyz.ahmetflix.chattingserver.connection.EnumProtocol;
 import xyz.ahmetflix.chattingserver.connection.EnumProtocolDirection;
 import xyz.ahmetflix.chattingserver.connection.NetworkManager;
@@ -33,6 +33,7 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -125,7 +126,7 @@ public class TestPing {
 
                         String s = serverstatusresponse.getFavicon() == null ? "data:image/png;base64," : serverstatusresponse.getFavicon();
                         String base64 = s.substring("data:image/png;base64,".length());
-                        byte[] imageBytes = javax.xml.bind.DatatypeConverter.parseBase64Binary(base64);
+                        byte[] imageBytes = Base64.getDecoder().decode(base64);
 
                         try {
                             Files.write(new File("C:\\Users\\Ahmet\\Desktop\\favicon").toPath(), imageBytes, StandardOpenOption.WRITE);

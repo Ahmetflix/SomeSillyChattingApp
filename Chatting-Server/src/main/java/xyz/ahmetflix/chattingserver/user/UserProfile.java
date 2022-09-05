@@ -1,4 +1,4 @@
-package xyz.ahmetflix.chattingserver;
+package xyz.ahmetflix.chattingserver.user;
 
 import com.google.common.base.Charsets;
 import org.apache.commons.lang3.StringUtils;

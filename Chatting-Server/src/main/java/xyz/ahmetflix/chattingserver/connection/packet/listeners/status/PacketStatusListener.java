@@ -1,7 +1,7 @@
 package xyz.ahmetflix.chattingserver.connection.packet.listeners.status;
 
 import xyz.ahmetflix.chattingserver.Server;
-import xyz.ahmetflix.chattingserver.UserProfile;
+import xyz.ahmetflix.chattingserver.user.UserProfile;
 import xyz.ahmetflix.chattingserver.connection.NetworkManager;
 import xyz.ahmetflix.chattingserver.connection.packet.impl.status.PacketStatusInPing;
 import xyz.ahmetflix.chattingserver.connection.packet.impl.status.PacketStatusInStart;

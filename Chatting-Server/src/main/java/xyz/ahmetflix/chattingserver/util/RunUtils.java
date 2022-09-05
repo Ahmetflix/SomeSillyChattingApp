@@ -1,4 +1,4 @@
-package xyz.ahmetflix.chattingserver;
+package xyz.ahmetflix.chattingserver.util;
 
 import org.apache.logging.log4j.Logger;
 

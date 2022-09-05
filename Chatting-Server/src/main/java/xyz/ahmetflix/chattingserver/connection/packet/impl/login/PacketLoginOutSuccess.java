@@ -1,6 +1,6 @@
 package xyz.ahmetflix.chattingserver.connection.packet.impl.login;
 
-import xyz.ahmetflix.chattingserver.UserProfile;
+import xyz.ahmetflix.chattingserver.user.UserProfile;
 import xyz.ahmetflix.chattingserver.connection.packet.Packet;
 import xyz.ahmetflix.chattingserver.connection.packet.PacketDataSerializer;
 import xyz.ahmetflix.chattingserver.connection.packet.listeners.login.PacketLoginOutListener;

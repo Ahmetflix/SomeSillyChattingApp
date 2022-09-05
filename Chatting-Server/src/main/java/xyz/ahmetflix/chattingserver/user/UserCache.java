@@ -1,19 +1,19 @@
-package xyz.ahmetflix.chattingserver;
+package xyz.ahmetflix.chattingserver.user;
 
 import com.google.common.base.Charsets;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.io.Files;
 import com.google.gson.*;
 import org.apache.commons.io.IOUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import xyz.ahmetflix.chattingserver.Server;
 
 import java.io.*;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
-import java.nio.file.Files;
-import java.nio.file.StandardOpenOption;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -87,7 +87,7 @@ public class UserCache {
         BufferedWriter bufferedwriter = null;
         try {
             String json = this.gson.toJson(this.getEntries(1000));
-            bufferedwriter = Files.newBufferedWriter(this.cacheFile.toPath(), Charsets.UTF_8, StandardOpenOption.WRITE);
+            bufferedwriter = Files.newWriter(this.cacheFile, Charsets.UTF_8);
             bufferedwriter.write(json);
         } catch (IOException ignored) {
         } finally {
@@ -113,9 +113,9 @@ public class UserCache {
             this.profiles.remove(userProfile);
             this.profiles.addFirst(userProfile);
         } else {
-            userProfile = UserProfile.makeUUIDIfNotExists(new UserProfile(null, name)); // Spigot - use correct case for offline players
+            userProfile = UserProfile.makeUUIDIfNotExists(new UserProfile(null, name));
             this.addNewProfile(userProfile);
-            entry = (UserCacheEntry) this.nameMap.get(lowerCasedName);
+            entry = this.nameMap.get(lowerCasedName);
         }
 
         this.save();
@@ -160,7 +160,7 @@ public class UserCache {
         BufferedReader bufferedreader = null;
 
         try {
-            bufferedreader = Files.newBufferedReader(this.cacheFile.toPath(), Charsets.UTF_8);
+            bufferedreader = Files.newReader(this.cacheFile, Charsets.UTF_8);
             List<UserCacheEntry> list = this.gson.fromJson(bufferedreader, UserCache.TYPE);
 
             this.nameMap.clear();

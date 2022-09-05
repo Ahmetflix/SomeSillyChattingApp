@@ -9,13 +9,11 @@ import org.apache.commons.io.IOUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.IOException;
-import java.io.Writer;
+import java.io.*;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -24,6 +22,11 @@ public class UserList<K, V extends UserListEntry<K>>
     protected static final Logger logger = LogManager.getLogger();
     protected final Gson gson;
     private final File saveFile;
+
+    public File getSaveFile() {
+        return saveFile;
+    }
+
     private final Map<String, V> values = Maps.<String, V>newHashMap();
     private boolean lanServer = true;
     private static final ParameterizedType saveFileFormat = new ParameterizedType()
@@ -116,7 +119,7 @@ public class UserList<K, V extends UserListEntry<K>>
     }
 
     /**
-     * Removes expired bans from the list. See {@link BanEntry#hasExpired}
+     * Removes expired bans from the list. See {@link UserListEntry#hasExpired}
      */
     private void removeExpired()
     {
@@ -141,7 +144,7 @@ public class UserList<K, V extends UserListEntry<K>>
         return new UserListEntry((Object)null, entryData);
     }
 
-    protected Map<String, V> getValues()
+    public Map<String, V> getValues()
     {
         return this.values;
     }
@@ -161,6 +164,37 @@ public class UserList<K, V extends UserListEntry<K>>
         {
             IOUtils.closeQuietly((Writer)bufferedwriter);
         }
+    }
+
+    public void load() throws FileNotFoundException {
+        Collection<UserListEntry<?>> collection = null;
+        BufferedReader bufferedreader = null;
+
+        try {
+            bufferedreader = Files.newReader(this.saveFile, Charsets.UTF_8);
+            collection = this.gson.fromJson(bufferedreader, saveFileFormat);
+        } catch (java.io.FileNotFoundException ex) {
+            LogManager.getLogger().info("Unable to find file {}, creating it.", this.saveFile);
+        } catch (com.google.gson.JsonSyntaxException ex) {
+            LogManager.getLogger().warn("Unable to read file {}, backing it up to {}.backup and creating new copy.", this.saveFile, this.saveFile);
+            File backup = new File(this.saveFile + ".backup");
+            this.saveFile.renameTo(backup);
+            this.saveFile.delete();
+        } finally {
+            IOUtils.closeQuietly(bufferedreader);
+        }
+
+        if (collection != null) {
+            this.values.clear();
+
+            for (UserListEntry<?> entry : collection) {
+
+                if (entry.getValue() != null) {
+                    this.values.put(this.getObjectKey((K) entry.getValue()), (V) entry);
+                }
+            }
+        }
+
     }
 
     class Serializer implements JsonDeserializer<UserListEntry<K>>, JsonSerializer<UserListEntry<K>>

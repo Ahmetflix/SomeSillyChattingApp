@@ -34,6 +34,10 @@ public class PacketDataSerializer extends ByteBuf {
         return 5;
     }
 
+    public void writeByteArray(byte[] abyte) {
+        a(abyte);
+    }
+
     public void a(byte[] abyte) {
         this.b(abyte.length);
         this.writeBytes(abyte);
@@ -53,10 +57,16 @@ public class PacketDataSerializer extends ByteBuf {
         return abyte;
     }
 
+    public <T extends Enum<T>> T readEnum(Class<T> oclass) {
+        return a(oclass);
+    }
     public <T extends Enum<T>> T a(Class<T> oclass) {
         return ((T[]) oclass.getEnumConstants())[this.readVarInt()];
     }
 
+    public void writeEnum(Enum<?> oenum) {
+        a(oenum);
+    }
     public void a(Enum<?> oenum) {
         this.b(oenum.ordinal());
     }
@@ -88,6 +98,9 @@ public class PacketDataSerializer extends ByteBuf {
         return i;
     }
 
+    public void writeUUID(UUID uuid) {
+        a(uuid);
+    }
     public void a(UUID uuid) {
         this.writeLong(uuid.getMostSignificantBits());
         this.writeLong(uuid.getLeastSignificantBits());

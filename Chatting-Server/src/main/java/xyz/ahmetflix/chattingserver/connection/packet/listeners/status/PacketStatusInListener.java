@@ -5,7 +5,7 @@ import xyz.ahmetflix.chattingserver.connection.packet.impl.status.PacketStatusIn
 import xyz.ahmetflix.chattingserver.connection.packet.impl.status.PacketStatusInStart;
 
 public interface PacketStatusInListener extends PacketListener {
-    void handlePing(PacketStatusInPing var1);
+    void handlePing(PacketStatusInPing packet);
 
-    void handleStatusStart(PacketStatusInStart var1);
+    void handleStatusStart(PacketStatusInStart packet);
 }

@@ -3,25 +3,22 @@ package xyz.ahmetflix.chattingserver.connection.pipeline;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import io.netty.bootstrap.ServerBootstrap;
-import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.*;
 import io.netty.channel.epoll.Epoll;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
 import io.netty.channel.local.LocalEventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
-import io.netty.handler.timeout.ReadTimeoutHandler;
+import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.GenericFutureListener;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import xyz.ahmetflix.chattingserver.LazyInitVar;
+import xyz.ahmetflix.chattingserver.util.LazyInitVar;
 import xyz.ahmetflix.chattingserver.Server;
-import xyz.ahmetflix.chattingserver.connection.EnumProtocolDirection;
 import xyz.ahmetflix.chattingserver.connection.NetworkManager;
 import xyz.ahmetflix.chattingserver.connection.ServerPipeline;
-import xyz.ahmetflix.chattingserver.connection.packet.PacketListener;
-import xyz.ahmetflix.chattingserver.connection.packet.listeners.handshaking.HandshakeListener;
+import xyz.ahmetflix.chattingserver.connection.packet.impl.play.PacketPlayOutKickDisconnect;
 import xyz.ahmetflix.chattingserver.crash.CrashReport;
 import xyz.ahmetflix.chattingserver.crash.CrashReportSystemDetails;
 import xyz.ahmetflix.chattingserver.crash.ReportedException;
@@ -140,13 +137,12 @@ public class ServerConnection {
 
                             LOGGER.warn((String)("Failed to handle packet for " + networkmanager.getSocketAddress()), (Throwable)exception);
                             String reason = "Internal server error";
-                            /*networkmanager.sendPacket(new S40PacketDisconnect(chatcomponenttext), new GenericFutureListener<Future<? super Void >>()
-                            {
-                                public void operationComplete(Future <? super Void > p_operationComplete_1_) throws Exception
-                                {
+                            networkmanager.handle(new PacketPlayOutKickDisconnect(reason), new GenericFutureListener<Future<? super Void>>() {
+                                @Override
+                                public void operationComplete(Future<? super Void> future) throws Exception {
                                     networkmanager.close(reason);
                                 }
-                            }, new GenericFutureListener[0]);*/
+                            }, new GenericFutureListener[0]);
                             networkmanager.disableAutoRead();
                         }
                     }

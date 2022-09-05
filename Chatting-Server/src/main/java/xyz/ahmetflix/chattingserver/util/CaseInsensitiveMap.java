@@ -1,4 +1,4 @@
-package xyz.ahmetflix.chattingserver;
+package xyz.ahmetflix.chattingserver.util;
 
 import gnu.trove.map.hash.TCustomHashMap;
 

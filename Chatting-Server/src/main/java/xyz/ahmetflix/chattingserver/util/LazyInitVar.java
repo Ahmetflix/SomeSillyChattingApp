@@ -1,4 +1,4 @@
-package xyz.ahmetflix.chattingserver;
+package xyz.ahmetflix.chattingserver.util;
 
 public abstract class LazyInitVar<T> {
     private T var;
